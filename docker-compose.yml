@@ -1,0 +1,18 @@
+# Runs the production build of the web app on http://localhost:3000.
+# Values come from the .env file (copy .env.example to .env first).
+#
+#   docker compose up --build
+#
+# The backend services run from their own repos. From inside this container they are reached
+# through host.docker.internal, for example USER_SERVICE_URL=http://host.docker.internal:8081
+
+services:
+  web:
+    build: .
+    container_name: sportsaura-web
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
