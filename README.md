@@ -1,27 +1,90 @@
 # SportsAura Web
 
 The website of the SportsAura platform, where people find and hire sports trainers.
-Built with **Next.js**. It talks to the SportsAura backend services (starting with the
-[user service](https://github.com/aariffulalam/sportsaura_user_service)) over their REST APIs.
+Built with **Next.js**. It talks to the SportsAura backend services over their REST APIs:
+
+- [user service](https://github.com/aariffulalam/sportsaura_user_service) (port 8081): accounts
+  and login.
+- [trainer service](https://github.com/aariffulalam/sportsaura_trainer_service) (port 8082):
+  sports, trainer profiles, and **all page text**, which lives in its database.
 
 - How the code is organised: [STRUCTURE.md](STRUCTURE.md)
 - How all SportsAura services fit together: the `sportsaura` docs repo (`ARCHITECTURE.md`)
 
-> **Status:** project setup only. The home page is a "coming soon" page; login, trainer pages and
-> booking will be added next.
+> **Status:** public pages (home, sports, trainers, how it works, for trainers), accounts and a
+> dashboard for each role work. Booking and payments come next.
 
 ## Contents
 
-1. [Tech stack](#tech-stack)
-2. [What you need installed](#what-you-need-installed)
-3. [Quick start](#quick-start)
-4. [Environment variables](#environment-variables)
-5. [Scripts](#scripts)
-6. [Code quality: ESLint and Prettier](#code-quality-eslint-and-prettier)
-7. [Editor setup (red and yellow lines)](#editor-setup-red-and-yellow-lines)
-8. [Tests](#tests)
-9. [Run with Docker](#run-with-docker)
-10. [Troubleshooting](#troubleshooting)
+1. [Pages](#pages)
+2. [How login works](#how-login-works)
+3. [Tech stack](#tech-stack)
+4. [What you need installed](#what-you-need-installed)
+5. [Quick start](#quick-start)
+6. [Environment variables](#environment-variables)
+7. [Scripts](#scripts)
+8. [Code quality: ESLint and Prettier](#code-quality-eslint-and-prettier)
+9. [Editor setup (red and yellow lines)](#editor-setup-red-and-yellow-lines)
+10. [Tests](#tests)
+11. [Run with Docker](#run-with-docker)
+12. [Troubleshooting](#troubleshooting)
+
+## Pages
+
+### Public pages (no sign-in needed)
+
+| URL                   | What it shows                                                                 | Data from                                             |
+| --------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `/`                   | Hero, three feature cards, all sports, three trainers, "Are you a coach?" box | trainer service: `content/home`, `sports`, `trainers` |
+| `/sports`             | Every sport with its description and number of trainers                       | trainer service: `sports`                             |
+| `/trainers`           | All trainers, with filters by sport and city (`?sport=yoga&city=Pune`)        | trainer service: `trainers`, `sports`                 |
+| `/trainers/42`        | One trainer: headline, sports, city, experience, price, bio                   | trainer service: `trainers/{id}`                      |
+| `/how-it-works`       | Three steps for players and three for trainers                                | trainer service: `content/how-it-works`               |
+| `/for-trainers`       | Benefits of joining and a sign-up button                                      | trainer service: `content/for-trainers`               |
+| `/register`, `/login` | Create an account / sign in                                                   | user service                                          |
+
+No text on these pages is written in the website's code: change a row in the trainer service's
+`content_blocks` table and the page changes on the next load.
+
+### Signed-in pages
+
+| URL                          | Who                | What it shows                                                     |
+| ---------------------------- | ------------------ | ----------------------------------------------------------------- |
+| `/dashboard`                 | everyone signed in | Where you land after signing in. Cards depend on the role (below) |
+| `/dashboard/trainer-profile` | TRAINER            | Form to create or edit your public trainer profile                |
+| `/account`                   | everyone signed in | Name, email, phone, role, member since                            |
+| `/admin/users`               | ADMIN              | Table of every account                                            |
+
+| Role    | Dashboard cards                                                                              |
+| ------- | -------------------------------------------------------------------------------------------- |
+| USER    | Find a trainer, Browse sports, My bookings (coming soon), My account                         |
+| TRAINER | Create / edit my trainer profile, View my public page, My sessions (coming soon), My account |
+| ADMIN   | Users, Trainers, Sports & page text (coming soon), My account                                |
+
+The header shows Sports, Trainers, How it works and For trainers to everyone, then either
+**Sign in / Create account** or **Dashboard**, your name and **Sign out**. Opening a private page
+while signed out sends you to `/login` and back afterwards.
+
+## How login works
+
+```
+Browser ──form──▶ Next.js server ──REST──▶ User service
+          ◀─ httpOnly cookies ─┘
+```
+
+1. The sign-in and register forms post to **Server Actions** (`src/features/auth/actions.ts`).
+   They run on the Next.js server, which calls the user service.
+2. The two tokens it returns are stored in **httpOnly cookies** (`sa_access`, `sa_refresh`).
+   Browser JavaScript can't read them, so a malicious script can't steal them.
+3. Pages read the cookie on the server and call the user service with it. The browser never calls
+   the user service directly, so no CORS setting is needed.
+4. The access token lives 15 minutes. When it runs out, `src/proxy.ts` swaps the refresh token
+   for new ones before the page renders, so the user stays signed in for 30 days.
+5. **Sign out** revokes the refresh token at the user service and deletes both cookies.
+
+Refresh tokens work only once, and a second use logs the user out everywhere, so `refreshOnce`
+makes sure parallel requests share a single refresh call. That works for one Next.js server. If you
+ever run several behind a load balancer, see the note in `src/features/auth/refresh-once.ts`.
 
 ## Tech stack
 
@@ -61,17 +124,24 @@ npm run dev
 
 Open <http://localhost:3000>. The page reloads automatically when you save a file.
 
-To use features that call the backend, also start the
+The pages need both backend services running: the
 [user service](https://github.com/aariffulalam/sportsaura_user_service#quick-start-with-docker)
-on port 8081.
+on port 8081 and the
+[trainer service](https://github.com/aariffulalam/sportsaura_trainer_service#quick-start-with-docker)
+on port 8082. For sample trainers, run `bash scripts/seed-dev-data.sh` in the trainer service repo.
 
 ## Environment variables
 
 Settings live in `.env` (never committed). [`.env.example`](.env.example) is the sample to copy.
 
-| Variable           | Required                  | Example                 | Meaning                      |
-| ------------------ | ------------------------- | ----------------------- | ---------------------------- |
-| `USER_SERVICE_URL` | yes, for backend features | `http://localhost:8081` | Base URL of the user service |
+| Variable              | Required | Example                 | Meaning                         |
+| --------------------- | -------- | ----------------------- | ------------------------------- |
+| `USER_SERVICE_URL`    | yes      | `http://localhost:8081` | Base URL of the user service    |
+| `TRAINER_SERVICE_URL` | yes      | `http://localhost:8082` | Base URL of the trainer service |
+
+In Docker (`docker compose up`), use `http://host.docker.internal:8081` and
+`http://host.docker.internal:8082` instead, because `localhost` inside the container is the
+container itself.
 
 Rules:
 
@@ -171,14 +241,15 @@ docker run --rm -v "${PWD}:/app" -v sportsaura-web-node-modules:/app/node_module
 
 ## Troubleshooting
 
-| Problem                                                         | Cause and fix                                                                                 |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `USER_SERVICE_URL is not set`                                   | No `.env` file. Copy `.env.example` to `.env`                                                 |
-| `Port 3000 is already in use`                                   | Stop the other app, or run `npx next dev -p 3001`                                             |
-| CORS error in the browser console when calling the user service | The user service does not allow this website's address yet. It needs a CORS setting (planned) |
-| `npm run format:check` fails in CI                              | Run `npm run format` and commit the result                                                    |
-| No red/yellow lines in VS Code                                  | Run `npm install`, install the recommended extensions, then _ESLint: Restart ESLint Server_   |
-| Types like `LayoutProps` not found                              | Run `npm run typecheck` once (it generates them), or start `npm run dev`                      |
+| Problem                                                                           | Cause and fix                                                                                                            |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `USER_SERVICE_URL is not set`                                                     | No `.env` file. Copy `.env.example` to `.env`                                                                            |
+| `Port 3000 is already in use`                                                     | Stop the other app, or run `npx next dev -p 3001`                                                                        |
+| Sign-in form says "We could not reach the SportsAura server"                      | The user service is not running, or `USER_SERVICE_URL` is wrong. In Docker it must be `http://host.docker.internal:8081` |
+| Signed in, but every page acts as signed out (production build over plain `http`) | Cookies are marked `Secure` in production. Browsers allow that on `localhost` only; use HTTPS anywhere else              |
+| `npm run format:check` fails in CI                                                | Run `npm run format` and commit the result                                                                               |
+| No red/yellow lines in VS Code                                                    | Run `npm install`, install the recommended extensions, then _ESLint: Restart ESLint Server_                              |
+| Types like `LayoutProps` not found                                                | Run `npm run typecheck` once (it generates them), or start `npm run dev`                                                 |
 
 ## A note on `AGENTS.md`
 

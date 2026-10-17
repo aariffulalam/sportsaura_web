@@ -8,19 +8,33 @@ Read the [short version](#the-short-version) first; the rest goes folder by fold
 In Next.js, **folders inside `src/app/` are the website's URLs**:
 
 ```
-src/app/page.tsx                    →  /
-src/app/login/page.tsx              →  /login            (planned)
-src/app/trainers/page.tsx           →  /trainers         (planned)
-src/app/trainers/[id]/page.tsx      →  /trainers/42      (planned)
+src/app/page.tsx                          →  /
+src/app/sports/page.tsx                   →  /sports
+src/app/trainers/page.tsx                 →  /trainers
+src/app/trainers/[id]/page.tsx            →  /trainers/42
+src/app/how-it-works/page.tsx             →  /how-it-works
+src/app/for-trainers/page.tsx             →  /for-trainers
+src/app/(auth)/login/page.tsx             →  /login
+src/app/(auth)/register/page.tsx          →  /register
+src/app/dashboard/page.tsx                →  /dashboard
+src/app/dashboard/trainer-profile/page.tsx →  /dashboard/trainer-profile
+src/app/account/page.tsx                  →  /account
+src/app/admin/users/page.tsx              →  /admin/users
 ```
+
+**Where the words on the pages come from:** not from this code. Page text, sports and trainers
+are loaded from the trainer service's database on every request, through
+`src/lib/trainer-service.ts`. Components in `src/components/ContentBlocks.tsx` only decide how a
+block of text looks.
 
 Everything that is not a page lives elsewhere in `src/`:
 
 ```
 src/app/         Pages and layouts (URLs)
-src/components/  Reusable UI pieces: buttons, cards, forms      (create when first needed)
-src/features/    Code for one area of the site: auth, trainers  (create when first needed)
-src/lib/         Small helpers with no UI: settings, API client, formatting
+src/components/  Reusable UI pieces: header, form fields, buttons, badges
+src/features/    Code for one area of the site: auth/ (login, cookies), trainers/ (profile form)
+src/lib/         Small helpers with no UI: settings, backend service clients, formatting
+src/proxy.ts     Runs before every request: keeps users signed in, guards private pages
 ```
 
 Three rules hold the structure together:
@@ -59,14 +73,52 @@ sportsaura_web/
 ├── STRUCTURE.md               This file
 ├── public/                    Files served as-is at the site root (robots.txt, images)
 └── src/
+    ├── proxy.ts               Before every request: refresh expired login, guard private pages
     ├── app/
-    │   ├── layout.tsx         The frame around every page: <html>, fonts, page title
+    │   ├── layout.tsx         The frame around every page: <html>, fonts, header
     │   ├── page.tsx           The home page ( / )
     │   ├── globals.css        Tailwind and site-wide styles
-    │   └── favicon.ico        Browser tab icon
+    │   ├── favicon.ico        Browser tab icon
+    │   ├── (auth)/            Group for sign-in pages; the name does not appear in the URL
+    │   │   ├── layout.tsx     Centered card around login and register
+    │   │   ├── login/page.tsx
+    │   │   └── register/page.tsx
+    │   ├── error.tsx          Friendly "Something went wrong" page, e.g. when a service is down
+    │   ├── sports/page.tsx    All sports (public)
+    │   ├── trainers/          Trainer list with filters, and trainers/[id] for one trainer (public)
+    │   ├── how-it-works/page.tsx, for-trainers/page.tsx   Text pages (public)
+    │   ├── dashboard/         Role-based dashboard, and trainer-profile/ for trainers
+    │   ├── account/page.tsx   My profile (signed-in users)
+    │   └── admin/users/page.tsx  All users (ADMIN only)
+    ├── components/
+    │   ├── SiteHeader.tsx     Logo, public links, sign-in links or the signed-in user and Sign out
+    │   ├── ContentBlocks.tsx  HeroBlock, BlockGrid, CallToAction: show text from the database
+    │   ├── SportCard.tsx      A sport with icon and trainer count
+    │   ├── TrainerCard.tsx    A trainer summary card, and SportChips
+    │   ├── Skeleton.tsx       Grey placeholders while data loads
+    │   ├── FormField.tsx      Labelled input with hint and error text
+    │   ├── FormMessage.tsx    Error banner for a whole form
+    │   ├── SubmitButton.tsx   Button that disables itself while the form is sending
+    │   └── RoleBadge.tsx      Coloured USER / TRAINER / ADMIN label
+    ├── features/trainers/
+    │   ├── actions.ts         Server Action: save my trainer profile
+    │   └── components/        TrainerProfileForm.tsx
+    ├── features/auth/
+    │   ├── actions.ts         Server Actions: login, register, logout
+    │   ├── components/        LoginForm.tsx, RegisterForm.tsx (interactive, "use client")
+    │   ├── cookies.ts         Cookie names and options (httpOnly, sameSite, lifetime)
+    │   ├── session.ts         Read, set and clear the login cookies
+    │   ├── current-user.ts    getCurrentUser(): the signed-in user, or null
+    │   ├── refresh-once.ts    One refresh call for parallel requests with the same token
+    │   ├── form-state.ts      Turns API errors into messages shown on the forms
+    │   └── auth.test.ts       Tests for the files above
     └── lib/
         ├── env.ts             Reads and checks server-side settings
-        └── env.test.ts        Tests for env.ts
+        ├── api-client.ts      Shared HTTP helper and ApiError for every backend service
+        ├── user-service.ts    Typed client for the user service REST API
+        ├── trainer-service.ts Typed client for the trainer service: sports, trainers, page text
+        ├── format.ts          Date and rupee formatting
+        └── *.test.ts          Tests next to the file they test
 ```
 
 ## Folder by folder
@@ -90,30 +142,40 @@ Special folder names:
 | `(group)`  | Groups pages without changing the URL                  | `(auth)/login` → `/login`        |
 | `_private` | Not a URL; a place for files used only by nearby pages | `_components/`                   |
 
-### `src/components/` — shared UI (create when first needed)
+### `src/components/` — shared UI
 
-Small, reusable pieces used on more than one page: `Button`, `Card`, `Input`, `Header`.
+Small, reusable pieces used on more than one page: the header, form fields, buttons, badges.
 One component per file, named in PascalCase: `TrainerCard.tsx`.
 
-### `src/features/` — one folder per area (create when first needed)
+### `src/features/` — one folder per area
 
-When an area grows (login, trainers, bookings), keep all its parts together:
+Each area (auth today; trainers and bookings later) keeps all its parts together: its forms in
+`components/`, its Server Actions in `actions.ts`, and its helpers. `features/auth/` is the
+example to copy.
 
-```
-src/features/auth/
-├── components/   LoginForm.tsx, RegisterForm.tsx
-├── api.ts        Calls to the user service
-└── types.ts      Shapes of the data
-```
+Pages that need the signed-in user call `getCurrentUser()` **inside a `<Suspense>` boundary**.
+It reads a cookie, and in this Next.js version that is only allowed inside a boundary; the rest of
+the page still loads instantly.
 
 ### `src/lib/` — helpers without UI
 
-| File     | Responsibility                                                                                  |
-| -------- | ----------------------------------------------------------------------------------------------- |
-| `env.ts` | Reads `USER_SERVICE_URL` (and future settings) and throws a clear error if missing or not a URL |
+| File                 | Responsibility                                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `env.ts`             | Reads `USER_SERVICE_URL` (and future settings) and throws a clear error if missing or not a URL                                                                 |
+| `api-client.ts`      | Sends a request to a backend service. Error responses become an `ApiError` with the server's message and field errors; `nullIfNotFound` turns a 404 into `null` |
+| `user-service.ts`    | Calls the user service: login, register, refresh, logout, my profile, list users                                                                                |
+| `trainer-service.ts` | Calls the trainer service: sports, trainer search and profiles, page text, save my profile                                                                      |
+| `format.ts`          | Formats dates and rupees the same way on server and browser                                                                                                     |
 
-Planned: an API client that adds the login token to requests and turns error responses into
-readable messages.
+Public pages call these inside `<Suspense>` and start with `await connection()`. That tells
+Next.js to load the data on every request, not once at build time (the services are not running
+during the build).
+
+### `src/proxy.ts` — runs before every request
+
+Keeps users signed in by swapping an expired access token for a new one, and sends signed-out
+visitors of `/account` and `/admin/...` to `/login`. Pages and Server Actions still check the
+login themselves; the proxy is only the first gate.
 
 ### `public/` — static files
 
@@ -122,8 +184,8 @@ Served exactly as they are, from the site root: `public/robots.txt` → `/robots
 ## Tests
 
 Test files live next to the file they test: `env.ts` → `env.test.ts`. Vitest finds every
-`src/**/*.test.ts(x)` file. Browser end-to-end tests (Playwright) will be added once there are
-real user flows such as login.
+`src/**/*.test.ts(x)` file. Browser end-to-end tests (Playwright) for the sign-in flows are the
+next step.
 
 ## Where do I put new code?
 
